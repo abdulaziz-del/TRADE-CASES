@@ -15,7 +15,7 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
     anthropic = None
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from datetime import datetime
 
@@ -1320,23 +1320,12 @@ INDEX_HTML = """<!DOCTYPE html>
           <label>الدولة الشاكية</label>
           <select id="filter-complainant" onchange="runSearch()">
             <option value="">الكل</option>
-            <option value="India">India</option>
-            <option value="China">China</option>
-            <option value="Qatar">Qatar</option>
-            <option value="Brazil">Brazil</option>
-            <option value="Indonesia">Indonesia</option>
-            <option value="Turkey">Türkiye</option>
           </select>
         </div>
         <div class="filter-group">
           <label>الدولة المدعى عليها</label>
           <select id="filter-respondent" onchange="runSearch()">
             <option value="">الكل</option>
-            <option value="Saudi Arabia">Saudi Arabia</option>
-            <option value="United States">United States</option>
-            <option value="European Union">European Union</option>
-            <option value="India">India</option>
-            <option value="China">China</option>
           </select>
         </div>
         <div class="filter-group">
@@ -1589,7 +1578,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="tab-content" id="tab-summary">
         <div style="margin-bottom:1rem">
           <div class="section-title">📝 الملخص بالعربية</div>
-          <div class="summary-box"><p id="summary-ar"></p></div>
+          <div class="summary-box"><p id="summary-ar" style="color:var(--text-secondary);font-size:13px;line-height:1.8"></p></div>
         </div>
         <div>
           <div class="section-title">📝 English Summary</div>
@@ -1858,8 +1847,10 @@ async function openModal(dsNum) {
       currentDispute.agreements.map(a => `<span class="agreement-chip">${a}</span>`).join('') +
       (currentDispute.articles || []).map(a => `<span class="agreement-chip" style="background:rgba(201,168,76,0.1);border-color:rgba(201,168,76,0.2);color:var(--accent-gold)">${a}</span>`).join('');
 
-    document.getElementById('third-parties-list').innerHTML =
-      (currentDispute.third_parties || []).map(p => `<span style="padding:3px 10px;border-radius:6px;font-size:12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-secondary)">${p}</span>`).join('');
+    const tpList = currentDispute.third_parties || [];
+    document.getElementById('third-parties-list').innerHTML = tpList.length
+      ? tpList.map(p => `<span style="padding:3px 10px;border-radius:6px;font-size:12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-secondary)">${p}</span>`).join('')
+      : '<span style="font-size:12px;color:var(--text-muted)">لا توجد أطراف ثالثة مسجلة لهذه القضية في قاعدة البيانات الحالية</span>';
 
     document.getElementById('wto-link').href = `https://www.wto.org/english/tratop_e/dispu_e/cases_e/${currentDispute.ds_number.toLowerCase()}_e.htm`;
     document.getElementById('summary-ar').textContent = currentDispute.summary_ar;
@@ -1867,6 +1858,18 @@ async function openModal(dsNum) {
     document.getElementById('ai-panel').textContent = 'اضغط على "تحليل" لتوليد تحليل قانوني ذكي لهذه القضية...';
     document.getElementById('memo-panel').textContent = 'اضغط لإنشاء مذكرة قانونية تنفيذية مخصصة...';
 
+    // Show Arabic summary or fallback message
+    const arEl = document.getElementById('summary-ar');
+    const enEl = document.getElementById('summary-en');
+    if (arEl) {
+      if (currentDispute.summary_ar && currentDispute.summary_ar.trim()) {
+        arEl.textContent = currentDispute.summary_ar;
+      } else {
+        arEl.style.color = 'var(--text-muted)';
+        arEl.textContent = 'الملخص العربي غير متوفر لهذه القضية — استخدم تبويب التحليل الذكي لتوليد ملخص عربي تلقائي.';
+      }
+    }
+    if (enEl) enEl.textContent = currentDispute.summary_en || '';
     showTab('info');
     document.getElementById('modal-overlay').classList.add('open');
   } catch(e) { console.error(e); }
@@ -2036,8 +2039,32 @@ function showToast(msg) {
 // INIT
 // ═══════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+  loadParties();
   runSearch();
 });
+
+async function loadParties() {
+  try {
+    const res = await fetch('/api/parties');
+    const data = await res.json();
+    const compSel = document.getElementById('filter-complainant');
+    const respSel = document.getElementById('filter-respondent');
+    if (compSel) {
+      data.complainants.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = p;
+        compSel.appendChild(o);
+      });
+    }
+    if (respSel) {
+      data.respondents.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = p;
+        respSel.appendChild(o);
+      });
+    }
+  } catch(e) { console.error('loadParties error:', e); }
+}
 </script>
 </body>
 </html>
@@ -2045,12 +2072,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 @app.route("/")
 def index():
-    from flask import Response
     return Response(INDEX_HTML, mimetype='text/html')
 
 @app.errorhandler(404)
 def not_found(e):
-    from flask import Response
     if request.path.startswith("/api/"):
         return jsonify({"error": "Not found", "path": request.path}), 404
     return Response(INDEX_HTML, mimetype='text/html')
@@ -2321,6 +2346,28 @@ def official_sources():
         }
     })
 
+
+@app.route("/api/parties", methods=["GET"])
+def get_parties():
+    """Return all unique complainants and respondents for dropdowns"""
+    bad = {'2.', 'AGREEMENT', 'N/A', '', 'غير محدد', 'Respondent', '1.'}
+    complainants = set()
+    respondents = set()
+    for d in WTO_ALL_DISPUTES:
+        for c in d.get('complainant', '').split(','):
+            c = c.strip()
+            if c and c not in bad and len(c) > 2:
+                complainants.add(c)
+        r = d.get('respondent', '').strip()
+        if r and r not in bad and len(r) > 2:
+            respondents.add(r)
+    all_parties = sorted(complainants | respondents)
+    return jsonify({
+        "complainants": sorted(complainants),
+        "respondents": sorted(respondents),
+        "all": all_parties
+    })
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({
@@ -2347,7 +2394,7 @@ def server_error(e):
 def handle_exception(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": str(e)}), 500
-    return send_from_directory(BASE_DIR, "index.html")
+    return Response(INDEX_HTML, mimetype="text/html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
