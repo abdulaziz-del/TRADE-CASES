@@ -51,6 +51,18 @@
     direction: rtl;
   }
 
+
+  /* ─── Global select fix — ensure readable text in all dropdowns ─── */
+  select {
+    background-color: #0d1e35 !important;
+    color: #e8f0fe !important;
+  }
+  select option {
+    background-color: #0d1e35 !important;
+    color: #e8f0fe !important;
+  }
+  select:focus { outline: none; }
+
   /* ─── Animated Background ─── */
   body::before {
     content: '';
@@ -283,19 +295,27 @@
 
   .filter-group select {
     padding: 8px 12px;
-    background: rgba(255,255,255,0.04);
+    background: #0d1e35;
     border: 1px solid var(--border);
     border-radius: 8px;
-    color: var(--text-primary);
+    color: #e8f0fe;
     font-family: var(--font-arabic);
     font-size: 13px;
     outline: none;
     cursor: pointer;
     transition: border-color 0.2s;
     direction: rtl;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .filter-group select option {
+    background: #0d1e35;
+    color: #e8f0fe;
   }
 
   .filter-group select:focus { border-color: var(--accent-blue); }
+  .filter-group select:hover { border-color: var(--border-bright); }
 
   .search-actions {
     display: flex;
@@ -1235,6 +1255,18 @@
             <option value="LOW">منخفضة</option>
           </select>
         </div>
+        <div class="filter-group">
+          <label>📂 مصدر البيانات</label>
+          <select id="filter-source" onchange="runSearch()">
+            <option value="all">الكل (194 قضية)</option>
+            <option value="pdf">📄 PDF رسمي 1995-2022 (186)</option>
+            <option value="curated">⭐ منتقى سعودي (8)</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;padding-top:4px">
+        <span style="color:var(--accent-green)">●</span>
+        <span id="source-counts">الكل: 194 | منشور PDF رسمي WTO 1995-2022: 186 | سعودي مُنتقى: 8</span>
       </div>
     </div>
 
@@ -1242,7 +1274,7 @@
       <div class="results-count">عُثر على <strong id="result-count">—</strong> قضية</div>
       <div style="display:flex;gap:8px;align-items:center">
         <span style="font-size:12px;color:var(--text-muted)">ترتيب حسب:</span>
-        <select id="sort-by" onchange="runSearch()" style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);font-family:var(--font-arabic);font-size:12px;padding:6px 10px;outline:none;">
+        <select id="sort-by" onchange="runSearch()" style="background:#0d1e35;border:1px solid var(--border);border-radius:8px;color:#e8f0fe;font-family:var(--font-arabic);font-size:12px;padding:6px 10px;outline:none;">
           <option value="relevance">الصلة بالمملكة</option>
           <option value="year">السنة</option>
           <option value="ds">رقم DS</option>
@@ -1252,11 +1284,11 @@
 
     <div class="disputes-grid" id="disputes-grid">
       <div class="empty-state" style="grid-column:1/-1">
-        <div class="icon">⚖️</div>
-        <h3>جارٍ تحميل قواعد بيانات WTO…</h3>
-        <p>يتم استرداد القضايا من قاعدة بيانات WTO الرسمية</p>
+        <div class="spinner"></div>
+        <p style="margin-top:12px;color:var(--text-muted);font-size:13px">جارٍ تحميل 194 قضية من منشور WTO الرسمي 1995-2022…</p>
       </div>
     </div>
+    <div id="pagination"></div>
   </section>
 
   <!-- ══════════════════ DASHBOARD SECTION ══════════════════ -->
@@ -1535,7 +1567,11 @@ function clearSearch() {
   runSearch();
 }
 
-async function runSearch() {
+let currentPage = 1;
+const PER_PAGE = 30;
+
+async function runSearch(page = 1) {
+  currentPage = page;
   const params = new URLSearchParams({
     q: document.getElementById('search-q').value,
     year: document.getElementById('filter-year').value,
@@ -1545,54 +1581,87 @@ async function runSearch() {
     respondent: document.getElementById('filter-respondent').value,
     status: document.getElementById('filter-status').value,
     saudi_relevance: document.getElementById('filter-saudi').value,
-    logic: searchLogic
+    logic: searchLogic,
+    source: document.getElementById('filter-source') ? document.getElementById('filter-source').value : 'all',
+    page: page,
+    per_page: PER_PAGE
   });
+
+  const grid = document.getElementById('disputes-grid');
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="spinner"></div><p style="margin-top:12px">جارٍ البحث في ' + (document.getElementById('filter-source')?.value === 'pdf' ? '186 قضية رسمية من منشور WTO 1995-2022' : '194 قضية') + '...</p></div>';
 
   try {
     const res = await fetch('/api/disputes?' + params);
     const data = await res.json();
     renderDisputes(data.disputes, 'disputes-grid');
     document.getElementById('result-count').textContent = data.total;
+    renderPagination(data.total, data.page, data.pages);
+    // Update source counters if available
+    if (data.source_counts) {
+      const srcEl = document.getElementById('source-counts');
+      if (srcEl) srcEl.textContent = `الكل: ${data.source_counts.all} | منشور PDF: ${data.source_counts.pdf} | سعودي مُنتقى: ${data.source_counts.curated}`;
+    }
   } catch(e) {
     console.error(e);
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">⚠️</div><h3>خطأ في الاتصال</h3></div>';
   }
+}
+
+function renderPagination(total, currentPg, totalPages) {
+  const el = document.getElementById('pagination');
+  if (!el || totalPages <= 1) { if(el) el.innerHTML = ''; return; }
+  let html = '<div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:1.5rem;flex-wrap:wrap">';
+  if (currentPg > 1) html += `<button class="btn btn-outline" style="padding:6px 14px;font-size:12px" onclick="runSearch(${currentPg-1})">→ السابق</button>`;
+  const start = Math.max(1, currentPg - 2);
+  const end = Math.min(totalPages, currentPg + 2);
+  if (start > 1) html += `<button class="btn btn-outline" style="padding:6px 10px;font-size:12px" onclick="runSearch(1)">1</button><span style="color:var(--text-muted)">…</span>`;
+  for (let i = start; i <= end; i++) {
+    html += `<button class="btn ${i===currentPg?'btn-primary':'btn-outline'}" style="padding:6px 10px;font-size:12px;min-width:36px" onclick="runSearch(${i})">${i}</button>`;
+  }
+  if (end < totalPages) html += `<span style="color:var(--text-muted)">…</span><button class="btn btn-outline" style="padding:6px 10px;font-size:12px" onclick="runSearch(${totalPages})">${totalPages}</button>`;
+  if (currentPg < totalPages) html += `<button class="btn btn-outline" style="padding:6px 14px;font-size:12px" onclick="runSearch(${currentPg+1})">← التالي</button>`;
+  html += `<span style="font-size:12px;color:var(--text-muted);margin-right:8px">صفحة ${currentPg} من ${totalPages} (${total} قضية)</span>`;
+  html += '</div>';
+  el.innerHTML = html;
 }
 
 function renderDisputes(disputes, containerId) {
   const grid = document.getElementById(containerId);
-  if (!disputes.length) {
+  if (!disputes || !disputes.length) {
     grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">🔍</div><h3>لا توجد نتائج</h3><p>جرّب تغيير معايير البحث</p></div>';
     return;
   }
 
-  const sortBy = document.getElementById('sort-by') ? document.getElementById('sort-by').value : 'relevance';
-  const sorted = [...disputes].sort((a, b) => {
-    if (sortBy === 'year') return b.year - a.year;
-    if (sortBy === 'ds') return a.ds_number.localeCompare(b.ds_number);
-    const order = {HIGH:0, MEDIUM:1, LOW:2};
-    return (order[a.saudi_relevance] ?? 3) - (order[b.saudi_relevance] ?? 3);
-  });
-
-  grid.innerHTML = sorted.map(d => `
+  grid.innerHTML = disputes.map(d => {
+    const stage = d.stage || d.status || 'N/A';
+    const stageClass = 'stage-' + stage.replace(/[\s\(\)\.]/g,'');
+    const isPDF = d.source && d.source.includes('1995-2022');
+    const srcBadge = isPDF
+      ? `<span style="padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.2);color:var(--accent-green);font-family:var(--font-mono)">📄 PDF</span>`
+      : `<span style="padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);color:var(--accent-gold);font-family:var(--font-mono)">⭐ منتقى</span>`;
+    return `
     <div class="dispute-card ${d.saudi_relevance === 'HIGH' ? 'saudi-high' : ''}" onclick="openModal('${d.ds_number}')">
       <div class="card-header">
-        <span class="ds-badge">${d.ds_number}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="ds-badge">${d.ds_number}</span>
+          ${srcBadge}
+        </div>
         <span class="relevance-badge rel-${d.saudi_relevance || 'LOW'}">🇸🇦 ${d.saudi_relevance || 'LOW'}</span>
       </div>
       <div class="card-title">${d.title}</div>
       <div class="card-parties">
-        <span class="party-tag complainant-tag">⚔️ ${d.complainant}</span>
-        <span class="party-tag respondent-tag">🛡️ ${d.respondent}</span>
+        <span class="party-tag complainant-tag">⚔️ ${(d.complainant||'').substring(0,30)}</span>
+        <span class="party-tag respondent-tag">🛡️ ${(d.respondent||'').substring(0,30)}</span>
       </div>
       <div class="card-agreements">
-        ${d.agreements.map(a => `<span class="agreement-chip">${a}</span>`).join('')}
+        ${(d.agreements||[]).slice(0,3).map(a => `<span class="agreement-chip">${a.substring(0,25)}</span>`).join('')}
       </div>
       <div class="card-footer">
-        <span class="stage-badge stage-${d.stage.replace(/\s/g,'')}">${d.stage}</span>
-        <span class="card-year">${d.year}</span>
+        <span class="stage-badge ${stageClass}">${stage}</span>
+        <span class="card-year">${d.year || '—'}</span>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1603,6 +1672,7 @@ async function loadDashboard() {
     const res = await fetch('/api/stats');
     const s = await res.json();
 
+    document.getElementById('stat-total').textContent = s.total;
     document.getElementById('stat-total').textContent = s.total;
     document.getElementById('stat-saudi-direct').textContent = s.saudi_involvement.direct;
     document.getElementById('stat-saudi-third').textContent = s.saudi_involvement.third_party;
