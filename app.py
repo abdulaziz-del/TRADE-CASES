@@ -9,7 +9,12 @@ Data Source: WTO One-Page Case Summaries 1995-2022 (Official WTO Publication)
 import os
 import json
 import re
-import anthropic
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    anthropic = None
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
@@ -97,17 +102,1958 @@ def build_stats():
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ── Embedded HTML (no file reading needed on Render) ──────────────────────────
+INDEX_HTML = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>منصة رصد نزاعات WTO الذكية | Saudi WTO Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* ═══════════════════════════════════════════════════════════
+     DESIGN SYSTEM — WTO Intelligence Platform
+     Aesthetic: Dark intelligence / diplomatic refinement
+     ═══════════════════════════════════════════════════════════ */
+  :root {
+    --bg-primary: #050c18;
+    --bg-secondary: #0a1628;
+    --bg-card: #0d1e35;
+    --bg-glass: rgba(13, 30, 53, 0.85);
+    --border: rgba(0, 162, 255, 0.12);
+    --border-bright: rgba(0, 162, 255, 0.35);
+    --accent-blue: #00a2ff;
+    --accent-gold: #c9a84c;
+    --accent-green: #00e5a0;
+    --accent-red: #ff4b4b;
+    --accent-orange: #ff8c42;
+    --text-primary: #e8f0fe;
+    --text-secondary: #8ba4c0;
+    --text-muted: #445566;
+    --saudi-green: #006c35;
+    --saudi-gold: #c9a84c;
+    --font-arabic: 'IBM Plex Sans Arabic', sans-serif;
+    --font-latin: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --radius: 12px;
+    --radius-lg: 20px;
+    --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --glow-blue: 0 0 24px rgba(0, 162, 255, 0.2);
+    --glow-gold: 0 0 24px rgba(201, 168, 76, 0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--font-arabic);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    direction: rtl;
+  }
+
+
+  /* ─── Global select fix — ensure readable text in all dropdowns ─── */
+  select {
+    background-color: #0d1e35 !important;
+    color: #e8f0fe !important;
+  }
+  select option {
+    background-color: #0d1e35 !important;
+    color: #e8f0fe !important;
+  }
+  select:focus { outline: none; }
+
+  /* ─── Animated Background ─── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse 80% 50% at 20% 10%, rgba(0, 100, 200, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(0, 108, 53, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 50% 50%, rgba(201, 168, 76, 0.03) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ─── Header ─── */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(5, 12, 24, 0.95);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+  }
+
+  .header-inner {
+    max-width: 1600px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    gap: 2rem;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+  }
+
+  .logo-emblem {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, var(--saudi-green), var(--accent-blue));
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+    font-family: var(--font-latin);
+  }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+
+  .logo-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+  }
+
+  .logo-subtitle {
+    font-size: 11px;
+    color: var(--accent-blue);
+    font-family: var(--font-latin);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .header-nav {
+    display: flex;
+    gap: 4px;
+  }
+
+  .nav-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-arabic);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .nav-btn:hover, .nav-btn.active {
+    background: rgba(0, 162, 255, 0.08);
+    border-color: var(--border-bright);
+    color: var(--accent-blue);
+  }
+
+  .nav-btn.saudi { color: var(--saudi-gold); }
+  .nav-btn.saudi:hover, .nav-btn.saudi.active {
+    background: rgba(201, 168, 76, 0.08);
+    border-color: rgba(201, 168, 76, 0.3);
+  }
+
+  /* ─── Layout ─── */
+  main {
+    position: relative;
+    z-index: 1;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ─── Hero / Search ─── */
+  .hero {
+    text-align: center;
+    padding: 3rem 0 2rem;
+    margin-bottom: 2rem;
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 162, 255, 0.08);
+    border: 1px solid rgba(0, 162, 255, 0.2);
+    border-radius: 100px;
+    padding: 4px 14px;
+    font-size: 12px;
+    color: var(--accent-blue);
+    margin-bottom: 1.5rem;
+    font-family: var(--font-latin);
+    letter-spacing: 1px;
+  }
+
+  .hero h1 {
+    font-size: clamp(1.8rem, 3.5vw, 2.8rem);
+    font-weight: 700;
+    background: linear-gradient(135deg, #e8f0fe 0%, #00a2ff 50%, #c9a84c 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.8rem;
+    line-height: 1.3;
+  }
+
+  .hero p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    max-width: 600px;
+    margin: 0 auto 2rem;
+    line-height: 1.7;
+  }
+
+  /* ─── Search Box ─── */
+  .search-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow), var(--glow-blue);
+  }
+
+  .search-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    margin-bottom: 1rem;
+  }
+
+  .search-main {
+    position: relative;
+  }
+
+  .search-main input {
+    width: 100%;
+    padding: 12px 48px 12px 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-family: var(--font-arabic);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+    direction: rtl;
+  }
+
+  .search-main input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(0, 162, 255, 0.1);
+  }
+
+  .search-main::before {
+    content: '🔍';
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    pointer-events: none;
+  }
+
+  .search-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin-bottom: 1rem;
+  }
+
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .filter-group label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .filter-group select {
+    padding: 8px 12px;
+    background: #0d1e35;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: #e8f0fe;
+    font-family: var(--font-arabic);
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    direction: rtl;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .filter-group select option {
+    background: #0d1e35;
+    color: #e8f0fe;
+  }
+
+  .filter-group select:focus { border-color: var(--accent-blue); }
+  .filter-group select:hover { border-color: var(--border-bright); }
+
+  .search-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .logic-toggle {
+    display: flex;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .logic-toggle button {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-latin);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .logic-toggle button.active {
+    background: var(--accent-blue);
+    color: white;
+  }
+
+  /* ─── Buttons ─── */
+  .btn {
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    border: none;
+    font-family: var(--font-arabic);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--accent-blue);
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 162, 255, 0.3);
+  }
+  .btn-primary:hover { background: #0090e0; transform: translateY(-1px); }
+
+  .btn-gold {
+    background: var(--accent-gold);
+    color: #0a0a0a;
+    box-shadow: 0 4px 12px rgba(201, 168, 76, 0.3);
+  }
+  .btn-gold:hover { background: #b89640; transform: translateY(-1px); }
+
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--accent-blue);
+  }
+  .btn-outline:hover { background: rgba(0, 162, 255, 0.08); }
+
+  .btn-green {
+    background: var(--accent-green);
+    color: #003020;
+  }
+  .btn-green:hover { background: #00cc90; transform: translateY(-1px); }
+
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+  /* ─── Cards Grid ─── */
+  .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+
+  .results-count {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .results-count strong {
+    color: var(--accent-blue);
+    font-family: var(--font-mono);
+    font-size: 18px;
+  }
+
+  .disputes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 1.5rem;
+  }
+
+  /* ─── Dispute Card ─── */
+  .dispute-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.25s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .dispute-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--accent-blue);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .dispute-card:hover {
+    border-color: var(--border-bright);
+    transform: translateY(-3px);
+    box-shadow: var(--shadow), var(--glow-blue);
+  }
+
+  .dispute-card:hover::before { opacity: 1; }
+
+  .dispute-card.saudi-high::before {
+    background: var(--accent-gold);
+    opacity: 0.6;
+  }
+
+  .dispute-card.saudi-high {
+    border-color: rgba(201, 168, 76, 0.2);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 1rem;
+  }
+
+  .ds-badge {
+    background: rgba(0, 162, 255, 0.1);
+    border: 1px solid rgba(0, 162, 255, 0.3);
+    color: var(--accent-blue);
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .relevance-badge {
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-latin);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  .rel-HIGH { background: rgba(201, 168, 76, 0.15); color: var(--accent-gold); border: 1px solid rgba(201, 168, 76, 0.3); }
+  .rel-MEDIUM { background: rgba(0, 229, 160, 0.1); color: var(--accent-green); border: 1px solid rgba(0, 229, 160, 0.3); }
+  .rel-LOW { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); }
+
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin-bottom: 1rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-parties {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 0.8rem;
+    flex-wrap: wrap;
+  }
+
+  .party-tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .complainant-tag { background: rgba(255, 75, 75, 0.1); border: 1px solid rgba(255,75,75,0.2); color: #ff8080; }
+  .respondent-tag { background: rgba(255, 140, 66, 0.1); border: 1px solid rgba(255,140,66,0.2); color: var(--accent-orange); }
+
+  .card-agreements {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 0.8rem;
+  }
+
+  .agreement-chip {
+    background: rgba(0, 162, 255, 0.06);
+    border: 1px solid rgba(0, 162, 255, 0.15);
+    color: var(--accent-blue);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .stage-badge {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-latin);
+  }
+
+  .stage-Consultations { background: rgba(255, 200, 0, 0.1); color: #ffcc00; border: 1px solid rgba(255, 200, 0, 0.2); }
+  .stage-Panel { background: rgba(0, 162, 255, 0.1); color: var(--accent-blue); border: 1px solid rgba(0,162,255,0.2); }
+  .stage-Appeal { background: rgba(200, 0, 255, 0.1); color: #cc66ff; border: 1px solid rgba(200,0,255,0.2); }
+  .stage-Implementation { background: rgba(0, 229, 160, 0.1); color: var(--accent-green); border: 1px solid rgba(0,229,160,0.2); }
+  .stage-Completed { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); }
+  .stage-Compliance { background: rgba(255, 140, 66, 0.1); color: var(--accent-orange); border: 1px solid rgba(255,140,66,0.2); }
+
+  .card-year {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ─── Modal ─── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    overflow-y: auto;
+    padding: 2rem;
+  }
+
+  .modal-overlay.open { display: flex; align-items: flex-start; justify-content: center; }
+
+  .modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius-lg);
+    max-width: 900px;
+    width: 100%;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6), var(--glow-blue);
+    animation: modalIn 0.3s ease;
+    margin: auto;
+    overflow: hidden;
+  }
+
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .modal-header {
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    background: rgba(0, 162, 255, 0.03);
+  }
+
+  .modal-ds {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent-blue);
+    margin-bottom: 4px;
+  }
+
+  .modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.4;
+    max-width: 700px;
+  }
+
+  .modal-close {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+
+  .modal-close:hover { background: rgba(255,75,75,0.1); color: #ff4b4b; border-color: rgba(255,75,75,0.3); }
+
+  .modal-body { padding: 2rem; }
+
+  .modal-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .modal-tab {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-arabic);
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .modal-tab.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .info-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+
+  .info-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    font-family: var(--font-latin);
+  }
+
+  .info-value {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .saudi-impact-box {
+    background: rgba(201, 168, 76, 0.06);
+    border: 1px solid rgba(201, 168, 76, 0.2);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .saudi-impact-box .label {
+    font-size: 11px;
+    color: var(--accent-gold);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    font-family: var(--font-latin);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .saudi-impact-box .value {
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.6;
+  }
+
+  .summary-box {
+    background: rgba(0, 162, 255, 0.04);
+    border: 1px solid rgba(0, 162, 255, 0.15);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .summary-box p {
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--text-secondary);
+  }
+
+  /* ─── AI Panel ─── */
+  .ai-panel {
+    background: rgba(0,0,0,0.2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    min-height: 120px;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .ai-loading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--accent-blue);
+    font-size: 14px;
+    padding: 1rem;
+  }
+
+  .spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(0, 162, 255, 0.2);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .ai-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+
+  /* ─── Dashboard ─── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    text-align: center;
+    transition: border-color 0.2s;
+  }
+
+  .stat-card:hover { border-color: var(--border-bright); }
+
+  .stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .charts-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .chart-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+  }
+
+  .chart-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bar-chart { display: flex; flex-direction: column; gap: 10px; }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 40px;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .bar-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: ltr;
+  }
+
+  .bar-track {
+    height: 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 100px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 100px;
+    background: linear-gradient(90deg, var(--accent-blue), var(--accent-gold));
+    transition: width 1s ease;
+  }
+
+  .bar-count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  /* ─── Saudi Watch Section ─── */
+  .saudi-hero {
+    background: linear-gradient(135deg, rgba(0, 108, 53, 0.1) 0%, rgba(201, 168, 76, 0.08) 100%);
+    border: 1px solid rgba(201, 168, 76, 0.2);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+  }
+
+  .saudi-flag-strip {
+    display: flex;
+    justify-content: center;
+    gap: 2px;
+    margin-bottom: 1rem;
+  }
+
+  .flag-seg {
+    width: 40px;
+    height: 6px;
+    border-radius: 3px;
+  }
+
+  .flag-green { background: var(--saudi-green); }
+  .flag-gold { background: var(--saudi-gold); }
+  .flag-white { background: rgba(255,255,255,0.6); }
+
+  .saudi-hero h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent-gold);
+    margin-bottom: 0.5rem;
+  }
+
+  .saudi-hero p {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  /* ─── AI Chat ─── */
+  .chat-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 600px;
+  }
+
+  .chat-header {
+    padding: 1rem 1.5rem;
+    background: rgba(0, 162, 255, 0.05);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ai-avatar {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--saudi-green));
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .message {
+    max-width: 85%;
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .message.user {
+    background: rgba(0, 162, 255, 0.1);
+    border: 1px solid rgba(0, 162, 255, 0.2);
+    color: var(--text-primary);
+    margin-right: auto;
+    border-bottom-right-radius: 4px;
+  }
+
+  .message.assistant {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    margin-left: auto;
+    border-bottom-left-radius: 4px;
+    white-space: pre-wrap;
+  }
+
+  .chat-input-row {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+  }
+
+  .chat-input {
+    flex: 1;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-family: var(--font-arabic);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    direction: rtl;
+    resize: none;
+  }
+
+  .chat-input:focus { border-color: var(--accent-blue); }
+
+  /* ─── Sources Page ─── */
+  .sources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+  }
+
+  .source-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: block;
+  }
+
+  .source-card:hover {
+    border-color: var(--border-bright);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+
+  .source-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-blue);
+    margin-bottom: 6px;
+  }
+
+  .source-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  .source-use {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ─── Empty State ─── */
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+  }
+
+  .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+  .empty-state h3 { font-size: 1.1rem; margin-bottom: 0.5rem; color: var(--text-secondary); }
+  .empty-state p { font-size: 13px; }
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius);
+    padding: 12px 24px;
+    font-size: 14px;
+    color: var(--text-primary);
+    z-index: 9999;
+    transition: transform 0.3s;
+    box-shadow: var(--shadow);
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0, 162, 255, 0.2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0, 162, 255, 0.4); }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 768px) {
+    main { padding: 1rem; }
+    .disputes-grid { grid-template-columns: 1fr; }
+    .charts-row { grid-template-columns: 1fr; }
+    .info-grid { grid-template-columns: 1fr; }
+    .header-nav { overflow-x: auto; }
+    .search-filters { grid-template-columns: 1fr 1fr; }
+    .modal { margin: 0; border-radius: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── Header ─────────────────────────────────────────── -->
+<header>
+  <div class="header-inner">
+    <a class="logo" href="#" onclick="showSection('search')">
+      <div class="logo-emblem">W</div>
+      <div class="logo-text">
+        <span class="logo-title">منصة WTO الذكية</span>
+        <span class="logo-subtitle">Dispute Intelligence Platform</span>
+      </div>
+    </a>
+    <nav class="header-nav">
+      <button class="nav-btn active" id="nav-search" onclick="showSection('search')">🔍 البحث في النزاعات</button>
+      <button class="nav-btn" id="nav-dashboard" onclick="showSection('dashboard')">📊 لوحة التحكم</button>
+      <button class="nav-btn saudi" id="nav-saudi" onclick="showSection('saudi')">🇸🇦 Saudi Watch</button>
+      <button class="nav-btn" id="nav-chat" onclick="showSection('chat')">🤖 المساعد القانوني</button>
+      <button class="nav-btn" id="nav-sources" onclick="showSection('sources')">📚 المصادر الرسمية</button>
+    </nav>
+  </div>
+</header>
+
+<!-- ─── Main ────────────────────────────────────────────── -->
+<main>
+
+  <!-- ══════════════════ SEARCH SECTION ══════════════════ -->
+  <section class="section active" id="section-search">
+    <div class="hero">
+      <div class="hero-badge">⚖️ WTO DISPUTE SETTLEMENT INTELLIGENCE</div>
+      <h1>منصة رصد نزاعات منظمة التجارة العالمية</h1>
+      <p>بحث قانوني متقدم، تحليل ذكاء اصطناعي، ومتابعة شاملة لقضايا WTO وأثرها على المملكة العربية السعودية</p>
+    </div>
+
+    <div class="search-container">
+      <div class="search-row">
+        <div class="search-main">
+          <input type="text" id="search-q" placeholder="ابحث بالموضوع أو الاتفاقية أو المادة القانونية... (CBAM, Steel, TRIPS, SCM...)" oninput="debounceSearch()">
+        </div>
+        <div class="search-actions">
+          <div class="logic-toggle">
+            <button id="logic-and" class="active" onclick="setLogic('AND')">AND</button>
+            <button id="logic-or" onclick="setLogic('OR')">OR</button>
+          </div>
+          <button class="btn btn-primary" onclick="runSearch()">🔍 بحث</button>
+          <button class="btn btn-outline" onclick="clearSearch()">مسح</button>
+        </div>
+      </div>
+
+      <div class="search-filters">
+        <div class="filter-group">
+          <label>السنة</label>
+          <select id="filter-year" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="2023">2023</option>
+            <option value="2022">2022</option>
+            <option value="2021">2021</option>
+            <option value="2020">2020</option>
+            <option value="2019">2019</option>
+            <option value="2018">2018</option>
+            <option value="2016">2016</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>الاتفاقية</label>
+          <select id="filter-agreement" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="GATT">GATT 1994</option>
+            <option value="GATS">GATS</option>
+            <option value="TRIPS">TRIPS</option>
+            <option value="SCM">SCM Agreement</option>
+            <option value="Anti-Dumping">Anti-Dumping</option>
+            <option value="Safeguards">Safeguards</option>
+            <option value="SPS">SPS Agreement</option>
+            <option value="TBT">TBT Agreement</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>القطاع</label>
+          <select id="filter-sector" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="Energy">الطاقة والبيئة</option>
+            <option value="Petrochemical">البتروكيماويات</option>
+            <option value="Metals">المعادن والصلب</option>
+            <option value="Agriculture">الزراعة والغذاء</option>
+            <option value="Services">الخدمات</option>
+            <option value="Intellectual Property">الملكية الفكرية</option>
+            <option value="Renewable">الطاقة المتجددة</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>الدولة الشاكية</label>
+          <select id="filter-complainant" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="India">India</option>
+            <option value="China">China</option>
+            <option value="Qatar">Qatar</option>
+            <option value="Brazil">Brazil</option>
+            <option value="Indonesia">Indonesia</option>
+            <option value="Turkey">Türkiye</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>الدولة المدعى عليها</label>
+          <select id="filter-respondent" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="Saudi Arabia">Saudi Arabia</option>
+            <option value="United States">United States</option>
+            <option value="European Union">European Union</option>
+            <option value="India">India</option>
+            <option value="China">China</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>المرحلة الإجرائية</label>
+          <select id="filter-status" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="Consultations">Consultations</option>
+            <option value="Panel">Panel</option>
+            <option value="Appeal">Appeal</option>
+            <option value="Implementation">Implementation</option>
+            <option value="Compliance">Compliance</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>🇸🇦 صلة بالمملكة</label>
+          <select id="filter-saudi" onchange="runSearch()">
+            <option value="">الكل</option>
+            <option value="HIGH">عالية</option>
+            <option value="MEDIUM">متوسطة</option>
+            <option value="LOW">منخفضة</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>📂 مصدر البيانات</label>
+          <select id="filter-source" onchange="runSearch()">
+            <option value="all">الكل (194 قضية)</option>
+            <option value="pdf">📄 PDF رسمي 1995-2022 (186)</option>
+            <option value="curated">⭐ منتقى سعودي (8)</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;padding-top:4px">
+        <span style="color:var(--accent-green)">●</span>
+        <span id="source-counts">الكل: 194 | منشور PDF رسمي WTO 1995-2022: 186 | سعودي مُنتقى: 8</span>
+      </div>
+    </div>
+
+    <div class="results-header">
+      <div class="results-count">عُثر على <strong id="result-count">—</strong> قضية</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:12px;color:var(--text-muted)">ترتيب حسب:</span>
+        <select id="sort-by" onchange="runSearch()" style="background:#0d1e35;border:1px solid var(--border);border-radius:8px;color:#e8f0fe;font-family:var(--font-arabic);font-size:12px;padding:6px 10px;outline:none;">
+          <option value="relevance">الصلة بالمملكة</option>
+          <option value="year">السنة</option>
+          <option value="ds">رقم DS</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="disputes-grid" id="disputes-grid">
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="spinner"></div>
+        <p style="margin-top:12px;color:var(--text-muted);font-size:13px">جارٍ تحميل 194 قضية من منشور WTO الرسمي 1995-2022…</p>
+      </div>
+    </div>
+    <div id="pagination"></div>
+  </section>
+
+  <!-- ══════════════════ DASHBOARD SECTION ══════════════════ -->
+  <section class="section" id="section-dashboard">
+    <div style="margin-bottom:2rem">
+      <h2 style="font-size:1.4rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">📊 لوحة التحكم التحليلية</h2>
+      <p style="color:var(--text-secondary);font-size:13px">إحصاءات شاملة لنزاعات منظمة التجارة العالمية مع تحليل خاص بمصالح المملكة</p>
+    </div>
+
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card"><div class="stat-value" id="stat-total">—</div><div class="stat-label">إجمالي القضايا</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-saudi-direct">—</div><div class="stat-label">قضايا المملكة المباشرة</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-saudi-third">—</div><div class="stat-label">المملكة كطرف ثالث</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-high-rel">—</div><div class="stat-label">قضايا ذات صلة عالية</div></div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">⚖️ الاتفاقيات الأكثر استناداً</div>
+        <div class="bar-chart" id="chart-agreements"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">🏭 توزيع القضايا حسب القطاع</div>
+        <div class="bar-chart" id="chart-sectors"></div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">📅 القضايا حسب السنة</div>
+        <div class="bar-chart" id="chart-years"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">🔄 المرحلة الإجرائية</div>
+        <div class="bar-chart" id="chart-status"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ SAUDI WATCH SECTION ══════════════════ -->
+  <section class="section" id="section-saudi">
+    <div class="saudi-hero">
+      <div class="saudi-flag-strip">
+        <div class="flag-seg flag-green"></div>
+        <div class="flag-seg flag-gold"></div>
+        <div class="flag-seg flag-green"></div>
+      </div>
+      <h2>🇸🇦 Saudi WTO Disputes Watch</h2>
+      <p>رصد وتحليل ومتابعة القضايا والنزاعات في WTO ذات الأثر على مصالح المملكة العربية السعودية ودول مجلس التعاون الخليجي</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem">
+      <div style="background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.2);border-radius:var(--radius-lg);padding:1.25rem;text-align:center">
+        <div style="font-size:2rem;margin-bottom:6px">⚡</div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent-gold);margin-bottom:4px">قضايا CBAM والكربون</div>
+        <div style="font-size:12px;color:var(--text-muted)">تأثير مباشر على الصادرات النفطية والبتروكيماوية</div>
+      </div>
+      <div style="background:rgba(0,229,160,0.06);border:1px solid rgba(0,229,160,0.15);border-radius:var(--radius-lg);padding:1.25rem;text-align:center">
+        <div style="font-size:2rem;margin-bottom:6px">🏗️</div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent-green);margin-bottom:4px">الصلب والألمنيوم والمعادن</div>
+        <div style="font-size:12px;color:var(--text-muted)">نزاعات تؤثر على تنافسية الصادرات السعودية</div>
+      </div>
+      <div style="background:rgba(0,162,255,0.06);border:1px solid rgba(0,162,255,0.15);border-radius:var(--radius-lg);padding:1.25rem;text-align:center">
+        <div style="font-size:2rem;margin-bottom:6px">🌿</div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent-blue);margin-bottom:4px">الطاقة المتجددة والهيدروجين</div>
+        <div style="font-size:12px;color:var(--text-muted)">نزاعات تدعم رؤية 2030 وأهداف التنويع</div>
+      </div>
+    </div>
+
+    <div class="disputes-grid" id="saudi-disputes-grid">
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ AI CHAT SECTION ══════════════════ -->
+  <section class="section" id="section-chat">
+    <div style="margin-bottom:1.5rem">
+      <h2 style="font-size:1.4rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">🤖 المساعد القانوني الذكي — WTO Legal AI</h2>
+      <p style="color:var(--text-secondary);font-size:13px">مستشار قانوني متخصص في اتفاقيات WTO وتأثيرها على المملكة العربية السعودية</p>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
+      <button class="btn btn-outline btn-sm" onclick="insertChat('ما هي قضايا CBAM وتأثيرها على الصادرات السعودية؟')">CBAM والصادرات السعودية</button>
+      <button class="btn btn-outline btn-sm" onclick="insertChat('اشرح الفرق بين المادتين I وIII من اتفاقية GATT')">GATT Art. I vs III</button>
+      <button class="btn btn-outline btn-sm" onclick="insertChat('ما موقف المملكة في قضية DS590؟')">قضية DS590</button>
+      <button class="btn btn-outline btn-sm" onclick="insertChat('ما هي اتفاقية SCM وكيف تؤثر على الدعم الصناعي السعودي؟')">اتفاقية SCM</button>
+      <button class="btn btn-outline btn-sm" onclick="insertChat('ما هي أحدث القضايا المتعلقة بالطاقة المتجددة في WTO؟')">نزاعات الطاقة المتجددة</button>
+    </div>
+
+    <div class="chat-container" id="chat-container">
+      <div class="chat-header">
+        <div class="ai-avatar">⚖️</div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text-primary)">WTO Legal Intelligence</div>
+          <div style="font-size:12px;color:var(--accent-green)">● متصل — جاهز للمساعدة القانونية</div>
+        </div>
+        <div style="margin-right:auto;display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="setLang('ar')" id="lang-ar" style="border-color:rgba(201,168,76,0.3);color:var(--accent-gold)">🇸🇦 عربي</button>
+          <button class="btn btn-outline btn-sm" onclick="setLang('en')" id="lang-en">🇺🇸 English</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="message assistant">
+مرحباً! أنا مستشارك القانوني المتخصص في نزاعات منظمة التجارة العالمية (WTO).
+
+يمكنني مساعدتك في:
+• تحليل القضايا وفق اتفاقيات WTO (GATT, GATS, TRIPS, SCM, TBT, SPS…)
+• تقييم تأثير النزاعات على المصالح التجارية السعودية
+• إعداد مذكرات قانونية ومخصصة للجهات الحكومية والقطاع الخاص
+• شرح إجراءات تسوية المنازعات في DSU
+• تحليل قضايا CBAM وتداعياتها على صادرات المملكة
+
+كيف يمكنني مساعدتك؟
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chat-input" rows="2" placeholder="اسأل عن أي قضية WTO أو اتفاقية أو تأثير على المملكة..." onkeydown="handleChatKey(event)"></textarea>
+        <button class="btn btn-primary" onclick="sendChat()">إرسال ↵</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ SOURCES SECTION ══════════════════ -->
+  <section class="section" id="section-sources">
+    <div style="margin-bottom:2rem">
+      <h2 style="font-size:1.4rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">📚 المصادر الرسمية وأدوات البحث</h2>
+      <p style="color:var(--text-secondary);font-size:13px">قائمة شاملة بالمصادر الرسمية لمتابعة وتحليل نزاعات WTO والتجارة الدولية</p>
+    </div>
+
+    <div style="margin-bottom:2rem">
+      <div class="section-title">🌐 منظمة التجارة العالمية — المصادر الرسمية</div>
+      <div class="sources-grid" id="sources-wto"></div>
+    </div>
+
+    <div style="margin-bottom:2rem">
+      <div class="section-title">📡 منصات الرصد والتنبيهات</div>
+      <div class="sources-grid" id="sources-monitor"></div>
+    </div>
+
+    <div style="margin-bottom:2rem">
+      <div class="section-title">🇸🇦 الجهات السعودية الرسمية</div>
+      <div class="sources-grid" id="sources-saudi"></div>
+    </div>
+
+    <div>
+      <div class="section-title">📈 أدوات التحليل الدولية</div>
+      <div class="sources-grid" id="sources-analysis"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ─── Dispute Detail Modal ────────────────────────────── -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModalIfBg(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-ds" id="modal-ds"></div>
+        <div class="modal-title" id="modal-title"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-tabs">
+        <button class="modal-tab active" onclick="showTab('info')">📋 معلومات القضية</button>
+        <button class="modal-tab" onclick="showTab('summary')">📝 الملخص القانوني</button>
+        <button class="modal-tab" onclick="showTab('ai')">🤖 التحليل الذكي</button>
+        <button class="modal-tab" onclick="showTab('memo')">📄 مذكرة تنفيذية</button>
+      </div>
+
+      <!-- Info Tab -->
+      <div class="tab-content active" id="tab-info">
+        <div class="info-grid" id="info-grid"></div>
+        <div class="saudi-impact-box" id="saudi-impact-box"></div>
+        <div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">الاتفاقيات والمواد القانونية</div>
+          <div id="agreements-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem"></div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">الأطراف الثالثة</div>
+          <div id="third-parties-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1.5rem"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a id="wto-link" href="#" target="_blank" class="btn btn-outline btn-sm">🔗 صفحة WTO الرسمية</a>
+          <button class="btn btn-gold btn-sm" onclick="showTab('ai');generateAI()">🤖 تحليل بالذكاء الاصطناعي</button>
+          <button class="btn btn-outline btn-sm" onclick="showTab('memo');generateMemo()">📄 مذكرة قانونية</button>
+        </div>
+      </div>
+
+      <!-- Summary Tab -->
+      <div class="tab-content" id="tab-summary">
+        <div style="margin-bottom:1rem">
+          <div class="section-title">📝 الملخص بالعربية</div>
+          <div class="summary-box"><p id="summary-ar"></p></div>
+        </div>
+        <div>
+          <div class="section-title">📝 English Summary</div>
+          <div class="summary-box"><p id="summary-en"></p></div>
+        </div>
+      </div>
+
+      <!-- AI Tab -->
+      <div class="tab-content" id="tab-ai">
+        <div class="ai-actions">
+          <button class="btn btn-gold btn-sm" onclick="generateAI('ar')">🤖 تحليل بالعربية</button>
+          <button class="btn btn-outline btn-sm" onclick="generateAI('en')">🤖 Analyze in English</button>
+        </div>
+        <div class="ai-panel" id="ai-panel">اضغط على "تحليل" لتوليد تحليل قانوني ذكي لهذه القضية...</div>
+      </div>
+
+      <!-- Memo Tab -->
+      <div class="tab-content" id="tab-memo">
+        <div class="ai-actions">
+          <button class="btn btn-gold btn-sm" onclick="generateMemo('ar','government')">🏛️ مذكرة حكومية — عربي</button>
+          <button class="btn btn-outline btn-sm" onclick="generateMemo('en','private')">💼 Private Sector Memo</button>
+          <button class="btn btn-green btn-sm" onclick="copyMemo()">📋 نسخ المذكرة</button>
+        </div>
+        <div class="ai-panel" id="memo-panel">اضغط لإنشاء مذكرة قانونية تنفيذية مخصصة...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ─── JavaScript ─────────────────────────────────────── -->
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let currentDispute = null;
+let searchLogic = 'AND';
+let chatLang = 'ar';
+let chatHistory = [];
+let debounceTimer = null;
+
+// ═══════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('section-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'saudi') loadSaudiWatch();
+  if (name === 'sources') loadSources();
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════
+function debounceSearch() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(runSearch, 400);
+}
+
+function setLogic(l) {
+  searchLogic = l;
+  document.getElementById('logic-and').classList.toggle('active', l === 'AND');
+  document.getElementById('logic-or').classList.toggle('active', l === 'OR');
+  runSearch();
+}
+
+function clearSearch() {
+  document.getElementById('search-q').value = '';
+  document.getElementById('filter-year').value = '';
+  document.getElementById('filter-agreement').value = '';
+  document.getElementById('filter-sector').value = '';
+  document.getElementById('filter-complainant').value = '';
+  document.getElementById('filter-respondent').value = '';
+  document.getElementById('filter-status').value = '';
+  document.getElementById('filter-saudi').value = '';
+  runSearch();
+}
+
+let currentPage = 1;
+const PER_PAGE = 30;
+
+function getVal(id, fallback='') {
+  const el = document.getElementById(id);
+  return el ? el.value : fallback;
+}
+
+async function runSearch(page = 1) {
+  currentPage = page;
+  const params = new URLSearchParams({
+    q: getVal('search-q'),
+    year: getVal('filter-year'),
+    agreement: getVal('filter-agreement'),
+    sector: getVal('filter-sector'),
+    complainant: getVal('filter-complainant'),
+    respondent: getVal('filter-respondent'),
+    status: getVal('filter-status'),
+    saudi_relevance: getVal('filter-saudi'),
+    logic: searchLogic,
+    source: getVal('filter-source', 'all'),
+    page: page,
+    per_page: PER_PAGE
+  });
+
+  const grid = document.getElementById('disputes-grid');
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="spinner"></div><p style="margin-top:12px">جارٍ البحث في ' + (document.getElementById('filter-source')?.value === 'pdf' ? '186 قضية رسمية من منشور WTO 1995-2022' : '194 قضية') + '...</p></div>';
+
+  try {
+    const res = await fetch('/api/disputes?' + params);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch(pe) {
+      console.error('Response is not JSON:', text.substring(0, 200));
+      throw new Error('Server returned non-JSON response');
+    }
+    renderDisputes(data.disputes, 'disputes-grid');
+    const rcnt = document.getElementById('result-count');
+    if (rcnt) rcnt.textContent = data.total;
+    renderPagination(data.total, data.page, data.pages);
+    if (data.source_counts) {
+      const srcEl = document.getElementById('source-counts');
+      if (srcEl) srcEl.textContent = `الكل: ${data.source_counts.all} | منشور PDF: ${data.source_counts.pdf} | سعودي مُنتقى: ${data.source_counts.curated}`;
+    }
+  } catch(e) {
+    console.error('runSearch error:', e);
+    if (grid) grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">⚠️</div><h3>خطأ في الاتصال</h3><p style="font-size:12px;color:var(--text-muted)">${e.message}</p><button class="btn btn-outline" style="margin-top:1rem" onclick="runSearch()">🔄 إعادة المحاولة</button></div>`;
+  }
+}
+
+function renderPagination(total, currentPg, totalPages) {
+  const el = document.getElementById('pagination');
+  if (!el || totalPages <= 1) { if(el) el.innerHTML = ''; return; }
+  let html = '<div style="display:flex;align-items:center;gap:8px;justify-content:center;margin-top:1.5rem;flex-wrap:wrap">';
+  if (currentPg > 1) html += `<button class="btn btn-outline" style="padding:6px 14px;font-size:12px" onclick="runSearch(${currentPg-1})">→ السابق</button>`;
+  const start = Math.max(1, currentPg - 2);
+  const end = Math.min(totalPages, currentPg + 2);
+  if (start > 1) html += `<button class="btn btn-outline" style="padding:6px 10px;font-size:12px" onclick="runSearch(1)">1</button><span style="color:var(--text-muted)">…</span>`;
+  for (let i = start; i <= end; i++) {
+    html += `<button class="btn ${i===currentPg?'btn-primary':'btn-outline'}" style="padding:6px 10px;font-size:12px;min-width:36px" onclick="runSearch(${i})">${i}</button>`;
+  }
+  if (end < totalPages) html += `<span style="color:var(--text-muted)">…</span><button class="btn btn-outline" style="padding:6px 10px;font-size:12px" onclick="runSearch(${totalPages})">${totalPages}</button>`;
+  if (currentPg < totalPages) html += `<button class="btn btn-outline" style="padding:6px 14px;font-size:12px" onclick="runSearch(${currentPg+1})">← التالي</button>`;
+  html += `<span style="font-size:12px;color:var(--text-muted);margin-right:8px">صفحة ${currentPg} من ${totalPages} (${total} قضية)</span>`;
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderDisputes(disputes, containerId) {
+  const grid = document.getElementById(containerId);
+  if (!disputes || !disputes.length) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">🔍</div><h3>لا توجد نتائج</h3><p>جرّب تغيير معايير البحث</p></div>';
+    return;
+  }
+
+  grid.innerHTML = disputes.map(d => {
+    const stage = d.stage || d.status || 'N/A';
+    const stageClass = 'stage-' + stage.replace(/[\\s\\(\\)\\.]/g,'');
+    const isPDF = d.source && d.source.includes('1995-2022');
+    const srcBadge = isPDF
+      ? `<span style="padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.2);color:var(--accent-green);font-family:var(--font-mono)">📄 PDF</span>`
+      : `<span style="padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);color:var(--accent-gold);font-family:var(--font-mono)">⭐ منتقى</span>`;
+    return `
+    <div class="dispute-card ${d.saudi_relevance === 'HIGH' ? 'saudi-high' : ''}" onclick="openModal('${d.ds_number}')">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="ds-badge">${d.ds_number}</span>
+          ${srcBadge}
+        </div>
+        <span class="relevance-badge rel-${d.saudi_relevance || 'LOW'}">🇸🇦 ${d.saudi_relevance || 'LOW'}</span>
+      </div>
+      <div class="card-title">${d.title}</div>
+      <div class="card-parties">
+        <span class="party-tag complainant-tag">⚔️ ${(d.complainant||'').substring(0,30)}</span>
+        <span class="party-tag respondent-tag">🛡️ ${(d.respondent||'').substring(0,30)}</span>
+      </div>
+      <div class="card-agreements">
+        ${(d.agreements||[]).slice(0,3).map(a => `<span class="agreement-chip">${a.substring(0,25)}</span>`).join('')}
+      </div>
+      <div class="card-footer">
+        <span class="stage-badge ${stageClass}">${stage}</span>
+        <span class="card-year">${d.year || '—'}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════
+async function loadDashboard() {
+  try {
+    const res = await fetch('/api/stats');
+    const s = await res.json();
+
+    document.getElementById('stat-total').textContent = s.total;
+    document.getElementById('stat-total').textContent = s.total;
+    document.getElementById('stat-saudi-direct').textContent = s.saudi_involvement.direct;
+    document.getElementById('stat-saudi-third').textContent = s.saudi_involvement.third_party;
+    document.getElementById('stat-high-rel').textContent = s.saudi_involvement.high_relevance;
+
+    renderBarChart('chart-agreements', s.by_agreement);
+    renderBarChart('chart-sectors', s.by_sector);
+    renderBarChart('chart-years', s.by_year);
+    renderBarChart('chart-status', s.by_status);
+  } catch(e) { console.error(e); }
+}
+
+function renderBarChart(containerId, data) {
+  const el = document.getElementById(containerId);
+  const entries = Object.entries(data).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  const max = Math.max(...entries.map(e => e[1]));
+  el.innerHTML = entries.map(([k, v]) => `
+    <div class="bar-row">
+      <div class="bar-label">${k}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v/max*100).toFixed(1)}%"></div></div>
+      <div class="bar-count">${v}</div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SAUDI WATCH
+// ═══════════════════════════════════════════════════════════
+async function loadSaudiWatch() {
+  try {
+    const res = await fetch('/api/saudi-watch');
+    const data = await res.json();
+    renderDisputes(data.disputes, 'saudi-disputes-grid');
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════════
+async function openModal(dsNum) {
+  try {
+    const res = await fetch('/api/disputes/' + dsNum);
+    currentDispute = await res.json();
+    if (currentDispute.error) return;
+
+    const _stage = currentDispute.stage || currentDispute.status || 'Completed';
+    const _stageClass = _stage.replace(/[\\s\\(\\)\\.]/g,'');
+    document.getElementById('modal-ds').textContent = currentDispute.ds_number;
+    document.getElementById('modal-title').textContent = currentDispute.title;
+
+    document.getElementById('info-grid').innerHTML = `
+      <div class="info-item"><div class="info-label">الدولة الشاكية</div><div class="info-value">⚔️ ${currentDispute.complainant}</div></div>
+      <div class="info-item"><div class="info-label">الدولة المدعى عليها</div><div class="info-value">🛡️ ${currentDispute.respondent}</div></div>
+      <div class="info-item"><div class="info-label">المرحلة الإجرائية</div><div class="info-value"><span class="stage-badge stage-${_stageClass}">${_stage}</span></div></div>
+      <div class="info-item"><div class="info-label">السنة / تاريخ الطلب</div><div class="info-value">${currentDispute.year} — ${currentDispute.request_date || '—'}</div></div>
+      <div class="info-item"><div class="info-label">القطاع</div><div class="info-value">${currentDispute.sector}</div></div>
+      <div class="info-item"><div class="info-label">الصلة بالمملكة</div><div class="info-value"><span class="relevance-badge rel-${currentDispute.saudi_relevance}">${currentDispute.saudi_relevance}</span></div></div>
+    `;
+
+    document.getElementById('saudi-impact-box').innerHTML = `
+      <div class="label">🇸🇦 تحليل الأثر على المملكة العربية السعودية</div>
+      <div class="value">${currentDispute.saudi_impact || 'غير محدد'}</div>
+    `;
+
+    document.getElementById('agreements-list').innerHTML =
+      currentDispute.agreements.map(a => `<span class="agreement-chip">${a}</span>`).join('') +
+      (currentDispute.articles || []).map(a => `<span class="agreement-chip" style="background:rgba(201,168,76,0.1);border-color:rgba(201,168,76,0.2);color:var(--accent-gold)">${a}</span>`).join('');
+
+    document.getElementById('third-parties-list').innerHTML =
+      (currentDispute.third_parties || []).map(p => `<span style="padding:3px 10px;border-radius:6px;font-size:12px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-secondary)">${p}</span>`).join('');
+
+    document.getElementById('wto-link').href = `https://www.wto.org/english/tratop_e/dispu_e/cases_e/${currentDispute.ds_number.toLowerCase()}_e.htm`;
+    document.getElementById('summary-ar').textContent = currentDispute.summary_ar;
+    document.getElementById('summary-en').textContent = currentDispute.summary_en;
+    document.getElementById('ai-panel').textContent = 'اضغط على "تحليل" لتوليد تحليل قانوني ذكي لهذه القضية...';
+    document.getElementById('memo-panel').textContent = 'اضغط لإنشاء مذكرة قانونية تنفيذية مخصصة...';
+
+    showTab('info');
+    document.getElementById('modal-overlay').classList.add('open');
+  } catch(e) { console.error(e); }
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  currentDispute = null;
+}
+
+function closeModalIfBg(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  const tabs = document.querySelectorAll('.modal-tab');
+  const map = {info:0, summary:1, ai:2, memo:3};
+  if (tabs[map[name]]) tabs[map[name]].classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════
+// AI FUNCTIONS
+// ═══════════════════════════════════════════════════════════
+async function generateAI(lang = 'ar') {
+  if (!currentDispute) return;
+  const panel = document.getElementById('ai-panel');
+  panel.innerHTML = '<div class="ai-loading"><div class="spinner"></div>جارٍ تحليل القضية بالذكاء الاصطناعي...</div>';
+  try {
+    const res = await fetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ds_number: currentDispute.ds_number, language: lang})
+    });
+    const data = await res.json();
+    if (data.error) { panel.textContent = '⚠️ ' + data.error; return; }
+    panel.textContent = data.analysis;
+  } catch(e) {
+    panel.textContent = '⚠️ خطأ في الاتصال بنظام الذكاء الاصطناعي. تأكد من إعداد ANTHROPIC_API_KEY.';
+  }
+}
+
+async function generateMemo(lang = 'ar', audience = 'government') {
+  if (!currentDispute) return;
+  const panel = document.getElementById('memo-panel');
+  panel.innerHTML = '<div class="ai-loading"><div class="spinner"></div>جارٍ إعداد المذكرة القانونية التنفيذية...</div>';
+  try {
+    const res = await fetch('/api/ai/memo', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ds_number: currentDispute.ds_number, language: lang, audience: audience})
+    });
+    const data = await res.json();
+    if (data.error) { panel.textContent = '⚠️ ' + data.error; return; }
+    panel.textContent = data.memo;
+  } catch(e) {
+    panel.textContent = '⚠️ خطأ في الاتصال. تأكد من إعداد ANTHROPIC_API_KEY.';
+  }
+}
+
+function copyMemo() {
+  const text = document.getElementById('memo-panel').textContent;
+  navigator.clipboard.writeText(text).then(() => showToast('✅ تم نسخ المذكرة'));
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHAT
+// ═══════════════════════════════════════════════════════════
+function setLang(l) {
+  chatLang = l;
+  document.getElementById('lang-ar').style.borderColor = l === 'ar' ? 'rgba(201,168,76,0.5)' : '';
+  document.getElementById('lang-en').style.borderColor = l === 'en' ? 'rgba(0,162,255,0.5)' : '';
+}
+
+function insertChat(text) {
+  document.getElementById('chat-input').value = text;
+  showSection('chat');
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  appendMessage('user', text);
+  chatHistory.push({role: 'user', content: text});
+
+  const thinkingId = appendMessage('assistant', '<div class="ai-loading"><div class="spinner"></div>يجري التفكير...</div>', true);
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({messages: chatHistory, language: chatLang})
+    });
+    const data = await res.json();
+    const reply = data.response || data.error || 'حدث خطأ';
+    updateMessage(thinkingId, reply);
+    chatHistory.push({role: 'assistant', content: reply});
+  } catch(e) {
+    updateMessage(thinkingId, '⚠️ خطأ في الاتصال. تأكد من إعداد ANTHROPIC_API_KEY في بيئة التشغيل.');
+  }
+}
+
+let msgId = 0;
+function appendMessage(role, html, isLoading = false) {
+  const id = 'msg-' + (++msgId);
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'message ' + role;
+  div.id = id;
+  if (isLoading) div.innerHTML = html;
+  else div.textContent = html;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return id;
+}
+
+function updateMessage(id, text) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; el.closest('.chat-messages').scrollTop = 99999; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SOURCES
+// ═══════════════════════════════════════════════════════════
+async function loadSources() {
+  try {
+    const res = await fetch('/api/sources');
+    const data = await res.json();
+
+    renderSources('sources-wto', data.wto_official);
+    renderSources('sources-monitor', data.monitoring);
+    renderSources('sources-saudi', data.saudi_official);
+    renderSources('sources-analysis', data.analysis);
+  } catch(e) {}
+}
+
+function renderSources(id, sources) {
+  document.getElementById(id).innerHTML = sources.map(s => `
+    <a class="source-card" href="${s.url}" target="_blank" rel="noopener">
+      <div class="source-name">🔗 ${s.name}</div>
+      <div class="source-desc">${s.description}</div>
+      <div class="source-use">💡 ${s.use_case}</div>
+    </a>
+  `).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  runSearch();
+});
+</script>
+</body>
+</html>
+"""
 
 @app.route("/")
 def index():
-    return send_from_directory(BASE_DIR, "index.html")
+    from flask import Response
+    return Response(INDEX_HTML, mimetype='text/html')
 
 @app.errorhandler(404)
 def not_found(e):
+    from flask import Response
     if request.path.startswith("/api/"):
         return jsonify({"error": "Not found", "path": request.path}), 404
-    return send_from_directory(BASE_DIR, "index.html")
+    return Response(INDEX_HTML, mimetype='text/html')
 
 @app.route("/api/disputes", methods=["GET"])
 def get_disputes():
@@ -221,8 +2167,8 @@ def get_pdf_disputes():
 
 @app.route("/api/ai/analyze", methods=["POST"])
 def ai_analyze():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+    if not ANTHROPIC_API_KEY or not ANTHROPIC_AVAILABLE:
+        return jsonify({"error": "AI غير مفعّل — أضف ANTHROPIC_API_KEY في إعدادات Render", "detail": "Set ANTHROPIC_API_KEY in Render environment variables"}), 503
     data = request.get_json()
     ds_number = data.get("ds_number", "")
     question = data.get("question", "")
@@ -262,8 +2208,8 @@ Question: {question if question else 'Provide a comprehensive legal analysis inc
 
 @app.route("/api/ai/compare", methods=["POST"])
 def ai_compare():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+    if not ANTHROPIC_API_KEY or not ANTHROPIC_AVAILABLE:
+        return jsonify({"error": "AI غير مفعّل — أضف ANTHROPIC_API_KEY في إعدادات Render", "detail": "Set ANTHROPIC_API_KEY in Render environment variables"}), 503
     data = request.get_json()
     ds_numbers = data.get("ds_numbers", [])
     language = data.get("language", "ar")
@@ -287,8 +2233,8 @@ def ai_compare():
 
 @app.route("/api/ai/memo", methods=["POST"])
 def ai_memo():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+    if not ANTHROPIC_API_KEY or not ANTHROPIC_AVAILABLE:
+        return jsonify({"error": "AI غير مفعّل — أضف ANTHROPIC_API_KEY في إعدادات Render", "detail": "Set ANTHROPIC_API_KEY in Render environment variables"}), 503
     data = request.get_json()
     ds_number = data.get("ds_number", "")
     audience = data.get("audience", "government")
@@ -325,8 +2271,8 @@ Format with sections: Executive Summary, Background, Key Legal Issues, Saudi Ara
 
 @app.route("/api/ai/chat", methods=["POST"])
 def ai_chat():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY not set"}), 500
+    if not ANTHROPIC_API_KEY or not ANTHROPIC_AVAILABLE:
+        return jsonify({"error": "AI غير مفعّل — أضف ANTHROPIC_API_KEY في إعدادات Render", "detail": "Set ANTHROPIC_API_KEY in Render environment variables"}), 503
     data = request.get_json()
     messages_history = data.get("messages", [])
     system_prompt = f"""You are an elite WTO Legal Advisor specializing in:
@@ -391,6 +2337,17 @@ def health():
         ],
         "timestamp": datetime.utcnow().isoformat()
     })
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"error": "Server error", "detail": str(e)}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": str(e)}), 500
+    return send_from_directory(BASE_DIR, "index.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
