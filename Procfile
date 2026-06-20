@@ -1,1 +1,1 @@
-https://trade-cases.onrender.com/api/health
+web: gunicorn app:app
