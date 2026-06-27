@@ -60,20 +60,81 @@ def find_dispute(ds):
             return d
     return None
 
+
+# ── Search normalization helpers ────────────────────────────────
+COUNTRY_ALIASES = {
+    "eu": "European Communities",
+    "european union": "European Communities",
+    "european communities": "European Communities",
+    "ec": "European Communities",
+    "usa": "United States",
+    "u.s.": "United States",
+    "us": "United States",
+    "united states of america": "United States",
+    "uk": "United Kingdom",
+    "u.k.": "United Kingdom",
+    "britain": "United Kingdom",
+    "great britain": "United Kingdom",
+    "turkey": "Türkiye",
+    "turkiye": "Türkiye",
+    "türkiye": "Türkiye",
+    "ksa": "Saudi Arabia",
+    "saudi": "Saudi Arabia",
+    "kingdom of saudi arabia": "Saudi Arabia",
+}
+
+def _norm_text(v):
+    return str(v or "").replace("–", "-").replace("—", "-").strip().lower()
+
+def _norm_country(v):
+    n = _norm_text(v)
+    return _norm_text(COUNTRY_ALIASES.get(n, v))
+
+def _split_values(value):
+    """Accept repeated/multi-select values sent as comma-separated strings."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw = []
+        for item in value:
+            raw.extend(str(item).split(","))
+    else:
+        raw = str(value).split(",")
+    return [x.strip() for x in raw if x and x.strip()]
+
+def _case_agreements(d):
+    vals = []
+    vals.extend(d.get("agreement_codes", []) or [])
+    vals.extend(d.get("agreements", []) or [])
+    out = set()
+    for a in vals:
+        a = str(a or "").strip()
+        if not a:
+            continue
+        out.add(a.upper())
+        out.add(a.split()[0].upper())
+    return out
+
+def _country_in_list(country, values):
+    cn = _norm_country(country)
+    return any(cn == _norm_country(v) for v in (values or []))
+
 def search_logic(params):
     q = params.get("q","").lower()
     year = params.get("year","")
     years = params.get("years","")  # comma-separated
-    agreement = params.get("agreement","")
-    agreements = params.get("agreements","")
-    sector = params.get("sector","")
-    sectors = params.get("sectors","")
-    complainant = params.get("complainant","")
-    complainants = params.get("complainants","")
-    respondent = params.get("respondent","")
-    respondents = params.get("respondents","")
-    third_party = params.get("third_party","")
-    third_parties_ms = params.get("third_parties","")
+    # Frontend currently sends multi-selects as singular comma-separated params.
+    # Accept both singular and plural names to avoid empty results in advanced search.
+    agreement = params.get("agreement", "")
+    agreements = params.get("agreements", agreement)
+    sector = params.get("sector", "")
+    sectors = params.get("sectors", sector)
+    complainant = params.get("complainant", "")
+    complainants = params.get("complainants", complainant)
+    respondent = params.get("respondent", "")
+    respondents = params.get("respondents", respondent)
+    third_party = params.get("third_party", "")
+    third_parties_ms = params.get("third_parties", third_party)
     status = params.get("status","")
     measure_type = params.get("measure_type","")
     saudi = params.get("saudi_relevance","")
@@ -87,11 +148,12 @@ def search_logic(params):
     sort_by = params.get("sort_by","year_desc")
 
     # Multi-value filters
-    year_list = [y.strip() for y in years.split(",") if y.strip()] if years else []
-    ag_list = [a.strip().upper() for a in agreements.split(",") if a.strip()] if agreements else []
-    sec_list = [s.strip().lower() for s in sectors.split(",") if s.strip()] if sectors else []
-    comp_list = [c.strip().lower() for c in complainants.split(",") if c.strip()] if complainants else []
-    resp_list = [r.strip().lower() for r in respondents.split(",") if r.strip()] if respondents else []
+    year_list = _split_values(years)
+    ag_list = [a.upper() for a in _split_values(agreements)]
+    sec_list = [_norm_text(s) for s in _split_values(sectors)]
+    comp_list = _split_values(complainants)
+    resp_list = _split_values(respondents)
+    tp_vals = _split_values(third_parties_ms)
 
     results = []
     for d in WTO_DISPUTES:
@@ -119,45 +181,32 @@ def search_logic(params):
             except: pass
 
         # Agreement filters
-        if agreement:
-            ags = [a.split()[0].upper() for a in d.get("agreements",[])]
-            filters.append(agreement.upper() in ags or any(agreement.upper() in a.upper() for a in d.get("agreements",[])))
+        if agreement and not ag_list:
+            ags = _case_agreements(d)
+            filters.append(agreement.upper() in ags or any(agreement.upper() in a for a in ags))
         if ag_list:
-            d_ags = [a.split()[0].upper() for a in d.get("agreements",[])]
-            filters.append(any(ag in d_ags for ag in ag_list))
+            ags = _case_agreements(d)
+            filters.append(any(ag in ags or any(ag in a for a in ags) for ag in ag_list))
 
         # Sector
-        if sector: filters.append(sector.lower() in d.get("sector","").lower())
-        if sec_list: filters.append(any(s in d.get("sector","").lower() for s in sec_list))
+        if sector and not sec_list: filters.append(_norm_text(sector) in _norm_text(d.get("sector", "")))
+        if sec_list: filters.append(any(s in _norm_text(d.get("sector", "")) for s in sec_list))
 
-        # Complainant — EXACT match against complainant_list
-        if complainant:
-            cn = complainant.lower().strip()
-            filters.append(any(cn == c.lower().strip() for c in d.get("complainant_list",[])))
+        # Parties — exact normalized matching; supports comma-separated multi-select values.
+        if complainant and not comp_list:
+            filters.append(_country_in_list(complainant, d.get("complainant_list", [])))
         if comp_list:
-            filters.append(any(
-                any(c == x.lower().strip() for x in d.get("complainant_list",[]))
-                for c in comp_list
-            ))
+            filters.append(any(_country_in_list(c, d.get("complainant_list", [])) for c in comp_list))
 
-        # Respondent — EXACT match
-        if respondent:
-            filters.append(respondent.lower().strip() == d.get("respondent","").lower().strip())
+        if respondent and not resp_list:
+            filters.append(_norm_country(respondent) == _norm_country(d.get("respondent", "")))
         if resp_list:
-            filters.append(any(r == d.get("respondent","").lower().strip() for r in resp_list))
+            filters.append(any(_norm_country(r) == _norm_country(d.get("respondent", "")) for r in resp_list))
 
-        # Third party — EXACT match
-        if third_party:
-            cn_tp = third_party.lower().strip()
-            filters.append(any(cn_tp == t.lower().strip() for t in d.get("third_parties",[])))
-        # Multi-select third parties
-        tp_list_param = params.get("third_parties","")
-        if tp_list_param:
-            tp_vals = [t.strip().lower() for t in tp_list_param.split(",") if t.strip()]
-            filters.append(any(
-                any(tv == t.lower().strip() for t in d.get("third_parties",[]))
-                for tv in tp_vals
-            ))
+        if third_party and not tp_vals:
+            filters.append(_country_in_list(third_party, d.get("third_parties", [])))
+        if tp_vals:
+            filters.append(any(_country_in_list(tv, d.get("third_parties", [])) for tv in tp_vals))
 
         # Status/Stage
         if status: filters.append(status.lower() in d.get("stage",d.get("status","")).lower())
@@ -243,17 +292,14 @@ def build_stats():
     return s
 
 def _exact_match(country_name, d):
-    """Exact match against complainant_list, respondent, or third_parties."""
-    cn = country_name.lower().strip()
-    return any(cn == c.lower().strip() for c in d.get("complainant_list", []))
+    """Exact normalized match against complainant_list."""
+    return _country_in_list(country_name, d.get("complainant_list", []))
 
 def _exact_resp(country_name, d):
-    cn = country_name.lower().strip()
-    return cn == d.get("respondent","").lower().strip()
+    return _norm_country(country_name) == _norm_country(d.get("respondent", ""))
 
 def _exact_tp(country_name, d):
-    cn = country_name.lower().strip()
-    return any(cn == t.lower().strip() for t in d.get("third_parties", []))
+    return _country_in_list(country_name, d.get("third_parties", []))
 
 def build_country_profile(country_name):
     as_complainant = [d for d in WTO_DISPUTES if _exact_match(country_name, d)]
